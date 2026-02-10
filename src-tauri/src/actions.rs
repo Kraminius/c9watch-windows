@@ -109,7 +109,74 @@ fn activate_app_fallback(app_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Windows fallback: use the Windows API to find and focus the application window
+#[cfg(target_os = "windows")]
+fn activate_app_fallback(app_name: &str) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextW, IsWindowVisible, SetForegroundWindow, ShowWindow,
+        SW_RESTORE,
+    };
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use std::sync::Mutex;
+
+    // Map app names to likely window title substrings
+    let search_term = match app_name {
+        "Visual Studio Code" => "Visual Studio Code",
+        "Cursor" => "Cursor",
+        "Windsurf" => "Windsurf",
+        "Zed" => "Zed",
+        "Sublime Text" => "Sublime Text",
+        "Windows Terminal" => "Windows Terminal",
+        "PowerShell" => "PowerShell",
+        "Command Prompt" => "Command Prompt",
+        _ => app_name,
+    };
+
+    let search_lower = search_term.to_lowercase();
+
+    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        // Safety: lparam is a pointer to our Mutex<Option<HWND>> and search string
+        let data = &*(lparam.0 as *const (Mutex<Option<HWND>>, String));
+
+        if IsWindowVisible(hwnd).as_bool() {
+            let mut title_buf = [0u16; 512];
+            let len = GetWindowTextW(hwnd, &mut title_buf);
+            if len > 0 {
+                let title = String::from_utf16_lossy(&title_buf[..len as usize]).to_lowercase();
+                if title.contains(&data.1) {
+                    if let Ok(mut found) = data.0.lock() {
+                        *found = Some(hwnd);
+                    }
+                    return BOOL(0); // Stop enumeration
+                }
+            }
+        }
+        BOOL(1) // Continue enumeration
+    }
+
+    let callback_data = (Mutex::new(None::<HWND>), search_lower);
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_callback),
+            LPARAM(&callback_data as *const _ as isize),
+        );
+
+        if let Ok(found) = callback_data.0.lock() {
+            if let Some(hwnd) = *found {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let _ = SetForegroundWindow(hwnd);
+                eprintln!("[open_session] Windows API activated window for: {}", app_name);
+                return Ok(());
+            }
+        }
+    }
+
+    eprintln!("[open_session] Could not find window for: {}", app_name);
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn activate_app_fallback(_app_name: &str) -> Result<(), String> {
     Ok(())
 }
@@ -209,12 +276,86 @@ fn get_app_cli(app_name: &str) -> Option<String> {
     None
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Get the CLI path for an application on Windows
+#[cfg(target_os = "windows")]
+fn get_app_cli(app_name: &str) -> Option<String> {
+    let local_app_data = std::env::var("LOCALAPPDATA").ok()?;
+    let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+
+    let cli_paths: Vec<(&str, Vec<String>)> = vec![
+        ("Visual Studio Code", vec![
+            format!(r"{}\Programs\Microsoft VS Code\bin\code.cmd", local_app_data),
+            format!(r"{}\Microsoft VS Code\bin\code.cmd", program_files),
+            format!(r"{}\Programs\Microsoft VS Code\Code.exe", local_app_data),
+        ]),
+        ("Cursor", vec![
+            format!(r"{}\Programs\cursor\resources\app\bin\cursor.cmd", local_app_data),
+            format!(r"{}\Programs\Cursor\Cursor.exe", local_app_data),
+        ]),
+        ("Windsurf", vec![
+            format!(r"{}\Programs\Windsurf\bin\windsurf.cmd", local_app_data),
+            format!(r"{}\Programs\Windsurf\Windsurf.exe", local_app_data),
+        ]),
+        ("Zed", vec![
+            format!(r"{}\Zed\zed.exe", local_app_data),
+            format!(r"{}\Programs\Zed\zed.exe", local_app_data),
+        ]),
+        ("Sublime Text", vec![
+            format!(r"{}\Sublime Text\subl.exe", program_files),
+            format!(r"{}\Sublime Text 3\subl.exe", program_files),
+        ]),
+    ];
+
+    for (name, paths) in &cli_paths {
+        if *name == app_name {
+            for path in paths {
+                if std::path::Path::new(path).exists() {
+                    return Some(path.clone());
+                }
+            }
+        }
+    }
+
+    // Fallback: try to find the binary via `where` (Windows equivalent of `which`)
+    let bin_name = match app_name {
+        "Visual Studio Code" => Some("code"),
+        "Cursor" => Some("cursor"),
+        "Windsurf" => Some("windsurf"),
+        "Zed" => Some("zed"),
+        "Sublime Text" => Some("subl"),
+        _ => None,
+    };
+
+    if let Some(name) = bin_name {
+        if let Ok(output) = Command::new("where").arg(name).output() {
+            if output.status.success() {
+                // `where` can return multiple lines; take the first one
+                let path = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn get_app_cli(_app_name: &str) -> Option<String> {
     None
 }
 
 /// Find the parent GUI application for a given process ID
+///
+/// On Unix systems, this walks up the process tree using `ps`.
+/// On Windows, this uses the Toolhelp32 snapshot API to walk the process tree.
+#[cfg(not(target_os = "windows"))]
 fn find_parent_app(pid: u32) -> Result<String, String> {
     let mut current_pid = pid;
 
@@ -283,6 +424,73 @@ fn find_parent_app(pid: u32) -> Result<String, String> {
     }
 }
 
+/// Windows: walk the process tree using Toolhelp32 snapshot API
+#[cfg(target_os = "windows")]
+fn find_parent_app(pid: u32) -> Result<String, String> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    eprintln!("[open_session] Starting with PID: {}", pid);
+
+    // Take a snapshot of all processes
+    let snapshot = unsafe {
+        CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            .map_err(|e| format!("Failed to create process snapshot: {}", e))?
+    };
+
+    // Build a map of PID -> (exe_name, parent_pid)
+    let mut process_map: std::collections::HashMap<u32, (String, u32)> = std::collections::HashMap::new();
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
+    unsafe {
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let exe_name = String::from_utf16_lossy(
+                    &entry.szExeFile[..entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len())]
+                );
+                process_map.insert(
+                    entry.th32ProcessID,
+                    (exe_name, entry.th32ParentProcessID),
+                );
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = windows::Win32::Foundation::CloseHandle(snapshot);
+    }
+
+    // Walk up the process tree
+    let mut current_pid = pid;
+    for i in 0..20 {
+        if let Some((exe_name, parent_pid)) = process_map.get(&current_pid) {
+            eprintln!("[open_session] Step {}: PID {} -> exe: {}", i, current_pid, exe_name);
+
+            if let Some(app_name) = get_app_name(exe_name) {
+                eprintln!("[open_session] Found app: {}", app_name);
+                return Ok(app_name.to_string());
+            }
+
+            if *parent_pid == 0 || *parent_pid == current_pid {
+                break;
+            }
+            current_pid = *parent_pid;
+        } else {
+            break;
+        }
+    }
+
+    eprintln!("[open_session] Falling back to Windows Terminal");
+    Ok("Windows Terminal".to_string())
+}
+
 /// Map process command names to application names
 fn get_app_name(comm: &str) -> Option<&'static str> {
     // macOS: Check for .app bundle paths (e.g., /Applications/Zed.app/Contents/MacOS/zed)
@@ -326,8 +534,14 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
         }
     }
 
-    // Extract the base name from the path
-    let base_name = comm.rsplit('/').next().unwrap_or(comm);
+    // Extract the base name from the path (handles both / and \ separators)
+    let base_name = comm
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(comm);
+
+    // Strip .exe suffix for Windows compatibility
+    let base_name = base_name.strip_suffix(".exe").unwrap_or(base_name);
 
     match base_name.to_lowercase().as_str() {
         // Terminals (cross-platform names)
@@ -347,6 +561,12 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
         "terminator" => Some("Terminator"),
         "ghostty" => Some("Ghostty"),
 
+        // Windows terminals
+        "windowsterminal" => Some("Windows Terminal"),
+        "cmd" => Some("Command Prompt"),
+        "powershell" | "pwsh" => Some("PowerShell"),
+        "conhost" => Some("Console Host"),
+
         // IDEs
         "zed" | "zed-editor" => Some("Zed"),
         "code" | "code helper" | "electron" => Some("Visual Studio Code"),
@@ -361,10 +581,11 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
     }
 }
 
-/// Stop a session by sending SIGTERM to the process
+/// Stop a session by terminating the process
 ///
-/// This gracefully terminates the Claude process by sending a SIGTERM signal.
-/// SIGTERM is preferred over SIGINT as Claude Code may trap SIGINT for its own use.
+/// On Unix: sends SIGTERM (signal 15) for graceful termination.
+/// On Windows: uses taskkill for graceful termination.
+#[cfg(not(target_os = "windows"))]
 pub fn stop_session(pid: u32) -> Result<(), String> {
     eprintln!("[stop_session] Stopping PID: {}", pid);
 
@@ -384,6 +605,43 @@ pub fn stop_session(pid: u32) -> Result<(), String> {
     }
 
     eprintln!("[stop_session] SIGTERM sent successfully");
+    Ok(())
+}
+
+/// Windows: stop a session using taskkill
+#[cfg(target_os = "windows")]
+pub fn stop_session(pid: u32) -> Result<(), String> {
+    eprintln!("[stop_session] Stopping PID: {}", pid);
+
+    // Use taskkill for graceful termination (sends WM_CLOSE / CTRL_CLOSE_EVENT)
+    let output = Command::new("taskkill")
+        .arg("/PID")
+        .arg(pid.to_string())
+        .output()
+        .map_err(|e| format!("Failed to execute taskkill: {}", e))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[stop_session] taskkill failed: {}", error);
+
+        // If graceful termination fails, try forceful termination
+        let force_output = Command::new("taskkill")
+            .arg("/F")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .output()
+            .map_err(|e| format!("Failed to execute taskkill /F: {}", e))?;
+
+        if !force_output.status.success() {
+            let force_error = String::from_utf8_lossy(&force_output.stderr);
+            return Err(format!("Failed to stop process {}: {}", pid, force_error));
+        }
+
+        eprintln!("[stop_session] Forceful termination succeeded");
+        return Ok(());
+    }
+
+    eprintln!("[stop_session] taskkill succeeded");
     Ok(())
 }
 
@@ -419,5 +677,16 @@ mod tests {
         assert_eq!(get_app_name("code"), Some("Visual Studio Code"));
         assert_eq!(get_app_name("zed"), Some("Zed"));
         assert_eq!(get_app_name("cursor"), Some("Cursor"));
+    }
+
+    #[test]
+    fn test_get_app_name_windows_exe() {
+        assert_eq!(get_app_name("Code.exe"), Some("Visual Studio Code"));
+        assert_eq!(get_app_name("WindowsTerminal.exe"), Some("Windows Terminal"));
+        assert_eq!(get_app_name("powershell.exe"), Some("PowerShell"));
+        assert_eq!(get_app_name("pwsh.exe"), Some("PowerShell"));
+        assert_eq!(get_app_name("cmd.exe"), Some("Command Prompt"));
+        assert_eq!(get_app_name("cursor.exe"), Some("Cursor"));
+        assert_eq!(get_app_name(r"C:\Program Files\Zed\zed.exe"), Some("Zed"));
     }
 }

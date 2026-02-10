@@ -168,8 +168,20 @@ impl SessionDetector {
             };
 
             // Encode the process cwd for matching
+            // Claude Code encodes project paths into directory names by replacing
+            // path separators and special characters with dashes.
+            // On Windows: C:\Users\foo bar → C--Users-foo-bar
+            // On Unix: /Users/foo bar → -Users-foo-bar
             let cwd_str = proc_cwd.to_string_lossy();
-            let encoded_cwd = cwd_str.replace('/', "-").replace('_', "-");
+            // Trim trailing path separators (Windows sysinfo often includes trailing \)
+            let cwd_trimmed = cwd_str.trim_end_matches(|c| c == '/' || c == '\\');
+            let encoded_cwd = cwd_trimmed
+                .replace('/', "-")
+                .replace('\\', "-")
+                .replace(':', "-")
+                .replace(' ', "-")
+                .replace('.', "-")
+                .replace('_', "-");
 
             // Helper closure to check if a session matches the process path
             let path_matches = |project_dir: &Path, project_path: &Path, has_reliable_path: bool| -> bool {
@@ -287,7 +299,12 @@ impl SessionDetector {
         None
     }
 
-    /// Finds all processes with name "claude"
+    /// Finds all Claude Code CLI processes
+    ///
+    /// On Windows, both Claude Desktop (Electron app) and Claude Code CLI share
+    /// the name "claude.exe". We distinguish them by checking the command line:
+    /// - Claude Desktop processes have flags like `--type=renderer`, `--startup`, etc.
+    /// - Claude Code CLI processes have no such Electron/Chromium flags.
     fn find_claude_processes(&self) -> Vec<ClaudeProcess> {
         let mut processes = Vec::new();
 
@@ -296,6 +313,33 @@ impl SessionDetector {
             let name = process.name().to_string_lossy();
 
             if name.contains("claude") && !name.contains("c9watch") {
+                // On Windows, filter out Claude Desktop (Electron) processes
+                // by checking for Electron-specific command line flags
+                #[cfg(target_os = "windows")]
+                {
+                    let cmd: Vec<String> = process.cmd().iter()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .collect();
+                    let cmd_joined = cmd.join(" ");
+
+                    // Skip Electron sub-processes (renderers, GPU, utility, crashpad)
+                    if cmd_joined.contains("--type=") {
+                        continue;
+                    }
+                    // Skip the main Claude Desktop process (launched with --startup)
+                    if cmd_joined.contains("--startup") {
+                        continue;
+                    }
+                    // Skip if the exe is from the AnthropicClaude app directory
+                    // (Claude Desktop), not from .local/bin or AppData/Roaming/Claude/claude-code
+                    if let Some(exe) = process.exe() {
+                        let exe_str = exe.to_string_lossy();
+                        if exe_str.contains("AnthropicClaude") {
+                            continue;
+                        }
+                    }
+                }
+
                 // Get the current working directory of the process
                 let cwd = process.cwd().map(|p| p.to_path_buf());
                 let start_time = process.start_time();

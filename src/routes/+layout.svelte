@@ -10,13 +10,17 @@
 		// If demo mode was persisted, load demo data and skip real fetch
 		const demoActive = loadDemoDataIfActive();
 
-		// Initialize Tauri event listeners for real-time updates
-		await initializeSessionListeners();
+		// Initialize Tauri event listeners (non-blocking)
+		initializeSessionListeners();
 
 		if (!demoActive) {
 			// Fetch initial session data and update store
-			const initialSessions = await getSessions();
-			sessions.set(initialSessions);
+			try {
+				const initialSessions = await getSessions();
+				sessions.set(initialSessions);
+			} catch (e) {
+				console.error('[c9watch] Failed to get initial sessions:', e);
+			}
 		}
 
 		// Check for updates in the background (non-blocking)
