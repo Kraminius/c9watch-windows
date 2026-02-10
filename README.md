@@ -2,7 +2,9 @@
 
 > Monitor and control all your Claude Code sessions from one place.
 
-**c9watch** (short for **c**laude cod**e** watch, like k8s for Kubernetes) is a macOS desktop app that gives you a real-time dashboard of every Claude Code session running on your machine. No more switching between terminals to check which agent needs permission, which one is working, and which one is idle.
+**c9watch** (short for **c**laude cod**e** watch, like k8s for Kubernetes) is a cross-platform desktop app that gives you a real-time dashboard of every Claude Code session running on your machine. No more switching between terminals to check which agent needs permission, which one is working, and which one is idle.
+
+Supports **macOS**, **Linux**, and **Windows**.
 
 ## Demo
 
@@ -12,7 +14,7 @@
 
 Unlike other Claude Code management tools that require you to launch sessions from within their app, **c9watch doesn't care where you start your sessions**. It discovers them automatically by scanning running processes at the OS level.
 
-Start Claude Code from any terminal or IDE you already use -- VS Code, Zed, iTerm2, Antigravity, you name it -- and c9watch picks them all up. No plugins to install. No workflows to change. No vendor lock-in.
+Start Claude Code from any terminal or IDE you already use -- VS Code, Cursor, Zed, iTerm2, Windows Terminal, you name it -- and c9watch picks them all up. No plugins to install. No workflows to change. No vendor lock-in.
 
 Just open c9watch and see everything.
 
@@ -22,19 +24,29 @@ Built with **Tauri**, **Rust**, and **Svelte** -- not Electron. The app binary i
 
 ## Install
 
-### Quick install
+### macOS
+
+**Quick install:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/minchenlee/c9watch/main/install.sh | bash
 ```
 
-### Download
+Or grab the latest `.dmg` from the [Releases](https://github.com/minchenlee/c9watch/releases) page.
 
-Grab the latest `.dmg` from the [Releases](https://github.com/minchenlee/c9watch/releases) page.
+### Windows
+
+Grab the latest `.exe` installer or `.msi` from the [Releases](https://github.com/minchenlee/c9watch/releases) page.
+
+> **Note:** On Windows, c9watch needs to read process information from running Claude Code sessions. If sessions are not detected, try running c9watch as administrator (right-click the `.exe` > "Run as administrator").
+
+### Linux
+
+Grab the latest `.deb` or `.AppImage` from the [Releases](https://github.com/minchenlee/c9watch/releases) page.
 
 ### Build from source
 
-Prerequisites: [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) (v18+), and the [Tauri CLI](https://v2.tauri.app/start/prerequisites/).
+Prerequisites: [Rust](https://rustup.rs/) (1.77+), [Node.js](https://nodejs.org/) (v18+), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
 git clone https://github.com/minchenlee/c9watch.git
@@ -43,7 +55,13 @@ npm install
 npm run tauri build
 ```
 
-The built `.app` will be in `src-tauri/target/release/bundle/macos/`.
+The built app will be in `src-tauri/target/release/bundle/`:
+
+| Platform | Output |
+|----------|--------|
+| macOS | `macos/c9watch.app` |
+| Windows | `nsis/c9watch_*_x64-setup.exe` and `msi/c9watch_*.msi` |
+| Linux | `deb/c9watch_*.deb` and `appimage/c9watch_*.AppImage` |
 
 ## Screenshots
 
@@ -79,7 +97,8 @@ Expand any card to see the full conversation history with formatted code, tool u
 - **Conversation viewer** -- Expand any session to view the full conversation with formatted markdown and code blocks
 - **Session control** -- Stop sessions, open their parent terminal/IDE, or rename them for easier tracking
 - **Multi-project view** -- Sessions grouped by project with git branch info
-- **Menu bar integration** -- Quick access from the macOS tray icon
+- **System tray integration** -- Quick access from the tray icon (macOS menu bar, Windows system tray)
+- **Cross-platform** -- Works on macOS, Windows, and Linux
 
 ## How it works
 
@@ -138,7 +157,28 @@ c9watch/
 
 ## Demo mode
 
-Press `Cmd+D` to toggle demo mode, which loads simulated sessions with animated status transitions. Useful for testing the UI without running real Claude Code sessions.
+Press `Cmd+D` (macOS) or `Ctrl+D` (Windows/Linux) to toggle demo mode, which loads simulated sessions with animated status transitions. Useful for testing the UI without running real Claude Code sessions.
+
+## Platform notes
+
+### Windows
+
+- c9watch automatically distinguishes between Claude Desktop (the Electron app) and Claude Code CLI sessions -- only CLI sessions are shown
+- If sessions are not detected, run c9watch as administrator to ensure process access permissions
+- Supported terminals: Windows Terminal, PowerShell, Command Prompt, and all cross-platform terminals (Alacritty, WezTerm, Ghostty, etc.)
+- Supported IDEs: VS Code, Cursor, Windsurf, Zed, Sublime Text
+
+### macOS
+
+- c9watch appears in the menu bar for quick access
+- Supported terminals: Terminal.app, iTerm2, Alacritty, kitty, Warp, Ghostty, and more
+- Supported IDEs: VS Code, Cursor, Windsurf, Zed
+
+### Linux
+
+- Requires `xdotool` for window focus functionality (optional)
+- Supported terminals: GNOME Terminal, Konsole, Alacritty, kitty, foot, WezTerm, Ghostty, and more
+- Supported IDEs: VS Code, Cursor, Windsurf, Zed, Sublime Text
 
 ## Contributing
 
