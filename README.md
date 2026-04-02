@@ -36,9 +36,9 @@ Or grab the latest `.dmg` from the [Releases](https://github.com/minchenlee/c9wa
 
 ### Windows
 
-Grab the latest `.exe` installer or `.msi` from the [Releases](https://github.com/minchenlee/c9watch/releases) page.
+See [Build from source -- Windows](#windows-1) below.
 
-> **Note:** On Windows, c9watch needs to read process information from running Claude Code sessions. If sessions are not detected, try running c9watch as administrator (right-click the `.exe` > "Run as administrator").
+> **Note:** On Windows, c9watch needs to read process information from running Claude Code sessions. If sessions are not detected, try running c9watch as administrator.
 
 ### Linux
 
@@ -47,6 +47,22 @@ Grab the latest `.deb` or `.AppImage` from the [Releases](https://github.com/min
 ### Build from source
 
 Prerequisites: [Rust](https://rustup.rs/) (1.77+), [Node.js](https://nodejs.org/) (v18+), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
+
+#### Windows
+
+1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **"Desktop development with C++"** workload (includes MSVC and the Windows SDK).
+2. Install [Rust](https://rustup.rs/) -- the installer will detect the Build Tools automatically.
+3. Install [Node.js](https://nodejs.org/) (v18+).
+4. [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) is required at runtime but comes pre-installed on Windows 10 (1803+) and Windows 11.
+
+```bash
+git clone https://github.com/Kraminius/c9watch-windows.git
+cd c9watch-windows
+npm install
+npm run tauri build
+```
+
+#### macOS / Linux
 
 ```bash
 git clone https://github.com/minchenlee/c9watch.git
@@ -60,7 +76,6 @@ The built app will be in `src-tauri/target/release/bundle/`:
 | Platform | Output |
 |----------|--------|
 | macOS | `macos/c9watch.app` |
-| Windows | `nsis/c9watch_*_x64-setup.exe` and `msi/c9watch_*.msi` |
 | Linux | `deb/c9watch_*.deb` and `appimage/c9watch_*.AppImage` |
 
 ## Screenshots
