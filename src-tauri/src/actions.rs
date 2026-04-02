@@ -467,15 +467,27 @@ fn find_parent_app(pid: u32) -> Result<String, String> {
         let _ = windows::Win32::Foundation::CloseHandle(snapshot);
     }
 
-    // Walk up the process tree
+    // Walk up the process tree.
+    // Shells (cmd, powershell, conhost) may be intermediate processes inside an IDE,
+    // so we keep walking past them to find a GUI app like VS Code. If no IDE is found,
+    // we fall back to the first shell/terminal match.
     let mut current_pid = pid;
+    let mut first_terminal: Option<String> = None;
+
     for i in 0..20 {
         if let Some((exe_name, parent_pid)) = process_map.get(&current_pid) {
             eprintln!("[open_session] Step {}: PID {} -> exe: {}", i, current_pid, exe_name);
 
             if let Some(app_name) = get_app_name(exe_name) {
-                eprintln!("[open_session] Found app: {}", app_name);
-                return Ok(app_name.to_string());
+                if is_intermediate_shell(app_name) {
+                    // Remember first shell match but keep walking for an IDE
+                    if first_terminal.is_none() {
+                        first_terminal = Some(app_name.to_string());
+                    }
+                } else {
+                    eprintln!("[open_session] Found app: {}", app_name);
+                    return Ok(app_name.to_string());
+                }
             }
 
             if *parent_pid == 0 || *parent_pid == current_pid {
@@ -487,8 +499,19 @@ fn find_parent_app(pid: u32) -> Result<String, String> {
         }
     }
 
-    eprintln!("[open_session] Falling back to Windows Terminal");
-    Ok("Windows Terminal".to_string())
+    let fallback = first_terminal.unwrap_or_else(|| "Windows Terminal".to_string());
+    eprintln!("[open_session] Falling back to: {}", fallback);
+    Ok(fallback)
+}
+
+/// Returns true for shell/host processes that are commonly embedded inside IDEs.
+/// These should be skipped when walking up the process tree so we can find the
+/// actual GUI parent (e.g. VS Code) instead of stopping at powershell.exe.
+fn is_intermediate_shell(app_name: &str) -> bool {
+    matches!(
+        app_name,
+        "PowerShell" | "Command Prompt" | "Console Host"
+    )
 }
 
 /// Map process command names to application names
