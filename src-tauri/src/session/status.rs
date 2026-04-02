@@ -70,7 +70,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
             if message.is_tool_result {
                 // This is a tool result - Claude should be generating its next response
                 // But if it's old, the session might be idle (process died, etc.)
-                if is_entry_recent(&base.timestamp, 15) {
+                if is_entry_recent(&base.timestamp, 30) {
                     SessionStatus::Working
                 } else {
                     SessionStatus::WaitingForInput
@@ -98,7 +98,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
 
                     if has_pending_tools {
                         // Tool is pending - check if there's active progress or recent activity
-                        if has_trailing_progress || is_entry_recent(&base.timestamp, 10) {
+                        if has_trailing_progress || is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
                             // Pending tool but no recent activity - likely stale
@@ -109,7 +109,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
                         // Since stop_reason is always None in JSONL, we use recency:
                         // if the entry was written recently, Claude is likely still
                         // streaming or about to write more. If old, session is idle.
-                        if is_entry_recent(&base.timestamp, 10) {
+                        if is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
                             SessionStatus::WaitingForInput

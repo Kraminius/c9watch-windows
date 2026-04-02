@@ -220,7 +220,16 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
         let status = if entries.is_empty() {
             SessionStatus::Connecting
         } else {
-            determine_status(&entries)
+            let raw_status = determine_status(&entries);
+            // If status would be WaitingForInput but the file was modified very recently,
+            // Claude is likely still actively working (progress entries update file mtime)
+            if raw_status == SessionStatus::WaitingForInput
+                && is_file_recently_modified(&session_file_path, 8)
+            {
+                SessionStatus::Working
+            } else {
+                raw_status
+            }
         };
 
         let latest_message = get_latest_message_from_entries(&entries);
@@ -259,6 +268,20 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
     }
 
     Ok(sessions)
+}
+
+/// Checks if a file was modified within the last N seconds
+fn is_file_recently_modified(path: &Path, seconds: u64) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|modified| {
+            modified
+                .elapsed()
+                .map(|elapsed| elapsed.as_secs() < seconds)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
 }
 
 /// Extract the first user prompt from a session JSONL file
